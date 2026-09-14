@@ -1,15 +1,10 @@
-<?php
-/**
- * The "TV". Open this in one tab, full screen.
- * It asks for a code, shows it, and polls until your website pairs it.
- */
-?>
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StreamBox — Device Setup</title>
+<script src="config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
 <style>
   :root { color-scheme: dark; }
@@ -27,7 +22,7 @@
     color: #5AA9C7; font-weight: 700;
   }
   h1 { font-size: clamp(1.4rem, 4vw, 2.1rem); font-weight: 600; margin: 14px 0 6px; }
-  .lead { color: #9AAAB4; font-size: 1rem; margin: 0 0 30px; }
+  .lead { color: #9AAAB4; font-size: 1rem; margin: 0 0 30px; line-height: 1.6; }
   .lead b { color: #E8EEF2; }
 
   .code {
@@ -60,6 +55,10 @@
     border-radius: 10px; background: #000; aspect-ratio: 16/9;
   }
   .err { color: #E5876A; }
+  code.mono {
+    font-family: ui-monospace, Menlo, monospace; font-size: .875rem;
+    background: #131C24; padding: 2px 7px; border-radius: 4px; color: #C9D6DD;
+  }
   button {
     margin-top: 20px; background: #1B4A5C; color: #E8EEF2;
     border: 1px solid #2B6B83; border-radius: 8px;
@@ -73,36 +72,27 @@
 
 <div class="screen" id="screen">
   <div class="brand">StreamBox</div>
-  <h1>Loading…</h1>
+  <h1>Starting up…</h1>
 </div>
 
 <script>
 const TEST_STREAM = 'https://stream.mux.com/v69RSHhFejbClaDbdF5Wvs72OgVwGyAHcbcpjYCTUaeg.m3u8';
-const screen = document.getElementById('screen');
+const API_BASE    = (window.API_BASE || '').replace(/\/$/, '');
+const screen      = document.getElementById('screen');
 
 let deviceCode = null;
 let interval   = 5;
 let expiresAt  = 0;
 let timer      = null;
 
-const api = (action, body) =>
-  fetch('api.php?action=' + action, {
+function api(action, body) {
+  return fetch(API_BASE + '/api.php?action=' + action, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {})
-  }).then(async r => ({ status: r.status, data: await r.json() }));
-
-function renderCode(userCode) {
-  screen.className = 'screen';
-  screen.innerHTML = `
-    <div class="brand">StreamBox</div>
-    <h1>Enter this code to activate</h1>
-    <p class="lead">On your phone or computer, go to <b>your website</b> and type the code below.</p>
-    <div class="code">${userCode}</div>
-    <div class="expiry" id="expiry"></div>
-    <div class="status"><span class="dot"></span><span>Waiting for activation…</span></div>
-  `;
-  tickExpiry();
+  })
+  .then(async r => ({ status: r.status, data: await r.json() }))
+  .catch(() => ({ status: 0, data: { error: 'network_error' } }));
 }
 
 function tickExpiry() {
@@ -111,20 +101,54 @@ function tickExpiry() {
   const left = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
   const m = String(Math.floor(left / 60)).padStart(2, '0');
   const s = String(left % 60).padStart(2, '0');
-  el.textContent = left > 0 ? `This code expires in ${m}:${s}` : 'Code expired — getting a new one…';
+  el.textContent = left > 0
+    ? 'This code expires in ' + m + ':' + s
+    : 'Code expired — getting a new one…';
+}
+
+function renderCode(userCode) {
+  const where = window.ACTIVATE_URL || 'your website';
+  screen.className = 'screen';
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1>Enter this code to activate</h1>' +
+    '<p class="lead">On your phone or computer, go to <b>' + where + '</b><br>and type the code below.</p>' +
+    '<div class="code">' + userCode + '</div>' +
+    '<div class="expiry" id="expiry"></div>' +
+    '<div class="status"><span class="dot"></span><span>Waiting for activation…</span></div>';
+  tickExpiry();
 }
 
 function renderPaired(name) {
   clearInterval(timer);
   screen.className = 'screen ok';
-  screen.innerHTML = `
-    <div class="brand">StreamBox</div>
-    <div class="tick">✓</div>
-    <h2>Your device has been paired</h2>
-    <p class="lead">Signed in as <b>${name || 'this device'}</b>. Starting playback…</p>
-    <video id="player" controls autoplay muted playsinline></video>
-  `;
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<div class="tick">&#10003;</div>' +
+    '<h2>Your device has been paired</h2>' +
+    '<p class="lead">Signed in as <b>' + (name || 'this device') + '</b>. Starting playback…</p>' +
+    '<video id="player" controls autoplay muted playsinline></video>';
   startPlayback();
+}
+
+function renderRefused() {
+  clearInterval(timer);
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1 class="err">Activation refused</h1>' +
+    '<p class="lead">Ask the account holder to try again.</p>' +
+    '<button onclick="requestCode()">Get a new code</button>';
+}
+
+function renderUnreachable() {
+  clearInterval(timer);
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1 class="err">Cannot reach the server</h1>' +
+    '<p class="lead">Tried <code class="mono">' + (API_BASE || '(API_BASE not set)') + '</code><br><br>' +
+    'Check two things: <b>API_BASE</b> in config.js points at your PHP host, and this page\'s ' +
+    'address is listed in <b>ALLOWED_ORIGINS</b> in config.php.</p>' +
+    '<button onclick="requestCode()">Try again</button>';
 }
 
 function startPlayback() {
@@ -134,18 +158,24 @@ function startPlayback() {
     const hls = new Hls();
     hls.loadSource(TEST_STREAM);
     hls.attachMedia(video);
-    hls.on(Hls.Events.ERROR, () => { video.poster = ''; });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = TEST_STREAM;
   }
 }
 
 async function requestCode() {
-  const { data } = await api('new', { device_name: 'Living Room TV' });
-  deviceCode = data.device_code;
-  interval   = data.interval || 5;
-  expiresAt  = Math.floor(Date.now() / 1000) + data.expires_in;
-  renderCode(data.user_code);
+  const res = await api('new', { device_name: 'Living Room TV' });
+
+  if (!res.data || !res.data.device_code) {
+    renderUnreachable();
+    return;
+  }
+
+  deviceCode = res.data.device_code;
+  interval   = res.data.interval || 5;
+  expiresAt  = Math.floor(Date.now() / 1000) + res.data.expires_in;
+
+  renderCode(res.data.user_code);
 
   clearInterval(timer);
   timer = setInterval(tickExpiry, 1000);
@@ -156,13 +186,12 @@ async function poll() {
   if (!deviceCode) return;
   const { data } = await api('poll', { device_code: deviceCode });
 
-  if (data.status === 'paired')          return renderPaired(data.device_name);
-  if (data.error === 'expired_token')    return requestCode();
-  if (data.error === 'access_denied')    {
-    screen.innerHTML = '<div class="brand">StreamBox</div><h1 class="err">Activation refused</h1>';
-    return;
-  }
-  setTimeout(poll, interval * 1000); // authorization_pending
+  if (data.status === 'paired')       { renderPaired(data.device_name); return; }
+  if (data.error === 'access_denied') { renderRefused(); return; }
+  if (data.error === 'expired_token') { requestCode(); return; }
+
+  // authorization_pending, or a temporary network blip — keep waiting.
+  setTimeout(poll, interval * 1000);
 }
 
 requestCode();

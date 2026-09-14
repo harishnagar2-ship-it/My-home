@@ -18,6 +18,43 @@ const ATTEMPT_WINDOW      = 300;  // ...within this many seconds
  *  Consonants only: no 0/O, no 1/I/l, and no accidental words. */
 const CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
 
+/**
+ * Origins allowed to call this API from a browser.
+ *
+ * The device page lives on a different host (Netlify, GitHub Pages, another
+ * server), so the browser will block its requests unless that exact origin is
+ * listed here. Add yours below — scheme and host, no trailing slash.
+ *
+ * Never use '*' once you send real credentials.
+ */
+const ALLOWED_ORIGINS = [
+    'http://localhost:8000',
+    'http://localhost:8001',
+    'http://127.0.0.1:8001',
+    // 'https://your-device-page.netlify.app',
+    // 'https://yourusername.github.io',
+    // 'https://www.yoursite.com',
+];
+
+/** Emit CORS headers, and answer the browser's preflight request. */
+function send_cors(): void
+{
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+
+    if ($origin !== '' && in_array($origin, ALLOWED_ORIGINS, true)) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Vary: Origin');
+        header('Access-Control-Allow-Methods: POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type');
+        header('Access-Control-Max-Age: 86400');
+    }
+
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+}
+
 function db(): PDO
 {
     static $pdo = null;

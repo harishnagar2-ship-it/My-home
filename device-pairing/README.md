@@ -6,19 +6,26 @@ No TV needed — one browser tab pretends to be the TV, the other is your websit
 This implements the same pattern Prime Video, Netflix and YouTube use:
 the **OAuth 2.0 Device Authorization Grant** ([RFC 8628](https://www.ietf.org/rfc/rfc8628.html)).
 
-## Run it
+## Run it locally
+
+Two servers, because the two halves deploy to two different hosts.
 
 ```bash
-cd device-pairing
-php -S localhost:8000
+# terminal 1 — the PHP API and your website
+cd device-pairing/server && php -S localhost:8000
+
+# terminal 2 — the TV page (static)
+cd device-pairing/device && php -S localhost:8001
 ```
 
 Then open **two tabs**:
 
 | Tab | URL | What it is |
 |---|---|---|
-| 1 | http://localhost:8000/device.php | The TV. Shows the code. |
+| 1 | http://localhost:8001/index.html | The TV. Shows the code. |
 | 2 | http://localhost:8000/activate.php | Your website. Type the code here. |
+
+To put these on real servers, see **DEPLOY.md**.
 
 Type the code from tab 1 into tab 2 and press Connect.
 Tab 2 says *"Your device has been paired"*. Within 5 seconds tab 1 switches
@@ -32,10 +39,11 @@ No database setup needed — it creates `pairing.sqlite` on first run.
 
 | File | Purpose |
 |---|---|
-| `config.php` | Database connection, schema, code generation, rate limiting |
-| `api.php` | The three endpoints: `new`, `poll`, `verify` |
-| `device.php` | The TV screen — requests a code, polls, plays video when paired |
-| `activate.php` | The pairing form — drop this into your existing site |
+| `server/config.php` | Database, schema, code generation, rate limiting, CORS allowlist |
+| `server/api.php` | The three endpoints: `new`, `poll`, `verify` |
+| `server/activate.php` | The pairing form — drop this into your existing site |
+| `device/index.html` | The TV screen — static, deploys anywhere |
+| `device/config.js` | The one file you edit when deploying: where the API lives |
 
 ## The API
 

@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/config.php';
 
+send_cors();
 header('Cache-Control: no-store');
 purge_expired();
 
