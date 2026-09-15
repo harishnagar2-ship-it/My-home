@@ -262,6 +262,91 @@ tier 1 and 3 only. That is an acceptable outcome. A working exploit is not.
 
 ---
 
+## The pairing flow — this exact order
+
+The code is checked **first**, before any login. Someone walking up to the
+website has been told by their TV to type a code, so that is the first thing
+the page asks for. Do not put a login wall in front of it.
+
+```
+  1. Visitor opens /activate           ← no login needed to reach this
+         │
+  2. Types the code, submits
+         │
+  3. Server checks the code ────────────────────────────────┐
+         │                                                   │
+         ├─ not found  → "Wrong code, check the TV"          │  all of these
+         ├─ expired    → "Code expired, get a new one"       │  are rate
+         ├─ used       → "Already used"                      │  limited
+         │                                                   │
+         └─ valid ──────────────────────────────────────────┘
+                 │
+                 │  hold the code in the session
+                 ▼
+  4. Logged in already? ── yes ──┐
+         │                        │
+         no                       │
+         │                        │
+         ▼                        │
+  5. Show login / register        │
+     (code still held)            │
+         │                        │
+         └────────────────────────┤
+                                  ▼
+  6. RE-CHECK the code, then pair it to this account
+         │
+         ├─ expired meanwhile → "Code expired while you were signing in.
+         │                       Get a new code from your TV."
+         │
+         └─ still valid → bind device to user, mark paired
+                 │
+                 ▼
+  7. "Connected — your device has been paired"
+         │
+         ▼
+  8. TV updates within one poll interval
+```
+
+### The step everyone gets wrong
+
+**Step 6 must re-check the code.** A naive build validates at step 3, carries a
+"valid" flag through login, and pairs blindly afterwards. But logging in takes
+time, and a person may stop to register an account, or reset a password. In that
+window the code can expire, or be used by someone else.
+
+Re-read the code from the database after login and validate it again. Trust the
+database, never a flag in the session.
+
+### Other details for this flow
+
+- The pending code lives in the session, not in a URL and not in a hidden form
+  field — neither survives a login redirect safely
+- **Regenerate the session id on login** (session fixation), and carry the
+  pending code across that regeneration deliberately. Doing one without the
+  other either loses the code or leaves the hole open
+- Registering a new account works the same as logging in — same pending code,
+  same completion
+- If the visitor abandons login and comes back later, the code is either still
+  valid (continue) or expired (ask for a new one). Never pair a stale code
+- Rate limiting applies at **step 3**, before any login. This is the one place
+  an unauthenticated stranger can probe, so it is the one that needs the cap
+- Show the device name at step 7 — "Living Room TV is now connected" — so the
+  person can tell they paired the screen they meant to
+
+### One security note to think about, not to panic over
+
+Checking the code before login means an unauthenticated visitor can find out
+whether a code exists. That is unavoidable in this design and real services
+accept it — the defence is the rate limit plus a short code lifetime, not
+hiding the check behind a login.
+
+Be aware of the underlying attack in any device-flow system: someone who guesses
+a live code and completes pairing with **their own** account ends up controlling
+what that TV shows. Short expiry and a hard rate limit are what make guessing
+impractical. Tell me if you see a cheap way to harden it further.
+
+---
+
 ## Security requirements
 
 These are not suggestions:
@@ -279,7 +364,7 @@ These are not suggestions:
 
 ---
 
-## Acceptance tests — all must pass before anything is deployed
+## Acceptance tests — all 28 must pass before anything is deployed
 
 Run these and show me the output.
 
@@ -293,31 +378,43 @@ Run these and show me the output.
 7. Lowercase, no dash (`bdwphqpk`) → still works
 8. TV reloads → still paired, no new code
 
-**Accounts**
+**Accounts and the code-first flow**
 9. Register, log out, log back in
-10. Pairing while logged in binds the device to that account
-11. User A cannot see or revoke user B's devices
-12. Revoked device stops receiving broadcasts
+10. Logged OUT, correct code → asked to log in, then paired after login
+11. Logged IN, correct code → paired immediately, no login step
+12. Logged OUT, wrong code → error at the code step, no login prompt,
+    and the attempt still counts against the rate limit
+13. Code expires DURING login → refused with "expired while signing in",
+    not silently paired
+14. Register a new account mid-flow → pairs to the new account
+15. Abandon login, come back with the session alive → code still works if
+    it has not expired
+16. Pairing binds the device to the account that logged in
+17. User A cannot see or revoke user B's devices
+18. Revoked device stops receiving broadcasts
 
 **Broadcast**
-13. Message broadcast reaches a paired screen
-14. Video by URL plays
-15. Uploaded clip plays
-16. Stop broadcast returns screens to idle
-17. `<img src=x onerror=alert(1)>` as a broadcast title renders as text,
+19. Message broadcast reaches a paired screen
+20. Video by URL plays
+21. Uploaded clip plays
+22. Stop broadcast returns screens to idle
+23. `<img src=x onerror=alert(1)>` as a broadcast title renders as text,
     does not execute
 
 **Upload security**
-18. A `.php` file renamed to `.mp4` is rejected
-19. A file over the size limit is rejected server-side
-20. A logged-out user posting directly to the upload endpoint is rejected
+24. A `.php` file renamed to `.mp4` is rejected
+25. A file over the size limit is rejected server-side
+26. A logged-out user posting directly to the upload endpoint is rejected
 
 **Cross-origin**
-21. Request from the allowed origin succeeds
-22. Request from an unlisted origin has no CORS header
+27. Request from the allowed origin succeeds
+28. Request from an unlisted origin has no CORS header
 
-Test 17, 18 and 20 are the ones that matter most. If any of those fail, the
-project is not ready regardless of how good everything else looks.
+Tests 13, 23, 24 and 26 are the ones that matter most. Test 13 in particular —
+the expired-during-login case — is the one a rushed build silently gets wrong,
+and it is the difference between a correct implementation and one that only
+looks correct. If any of those four fail, the project is not ready regardless
+of how good everything else looks.
 
 ---
 
@@ -354,16 +451,16 @@ but not verified" than find out later.
 
 A person can:
 
-1. Register on the website
-2. Install the app on an Android TV
-3. See a code on the TV
-4. Type it on the website while logged in
-5. See the TV pair within seconds
+1. Install the app on an Android TV
+2. See a code on the TV
+3. Go to the website and type the code — without logging in first
+4. Be asked to log in or register, and do so
+5. See "Connected", and the TV pair within seconds
 6. Have an admin broadcast a message, an uploaded clip, and a video URL
 7. See all three appear on the TV
 8. Revoke the device from their account and see it stop receiving
 
-All 22 acceptance tests pass. Nothing costs money. Every account this project
+All 28 acceptance tests pass. Nothing costs money. Every account this project
 uses was created for this project and is used by nothing else. Every tool in
 the build was one I approved by name.
 
