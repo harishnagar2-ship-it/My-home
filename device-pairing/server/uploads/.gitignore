@@ -1,0 +1,4 @@
+# uploaded media lives here at runtime; never commit it
+*
+!.htaccess
+!.gitignore

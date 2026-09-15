@@ -1,0 +1,9 @@
+# Nothing in this folder may ever execute. If an attacker somehow lands a
+# script here, this is what stops it from running.
+<IfModule mod_php.c>
+  php_flag engine off
+</IfModule>
+<FilesMatch "\.(php|phtml|php[0-9]|phar|pl|py|cgi|sh)$">
+  Require all denied
+</FilesMatch>
+Options -ExecCGI -Indexes

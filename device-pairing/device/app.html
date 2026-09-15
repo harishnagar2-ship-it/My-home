@@ -152,6 +152,12 @@ function renderIdle() {
     '<div class="status"><span class="dot"></span><span>Listening</span></div>';
 }
 
+/** Uploaded files are stored as 'uploads/<name>' on the API host. */
+function mediaSrc(url) {
+  if (!url) return '';
+  return /^https?:\/\//i.test(url) ? url : API_BASE + '/' + url.replace(/^\/+/, '');
+}
+
 function renderBroadcast(b) {
   screen.className = 'screen';
 
@@ -167,7 +173,7 @@ function renderBroadcast(b) {
     screen.innerHTML =
       '<div class="brand">StreamBox &middot; Live</div>' +
       (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
-      '<img class="shot" src="' + encodeURI(b.media_url || '') + '" alt="">';
+      '<img class="shot" src="' + encodeURI(mediaSrc(b.media_url)) + '" alt="">';
     return;
   }
 
@@ -176,7 +182,7 @@ function renderBroadcast(b) {
       '<div class="brand">StreamBox &middot; Live</div>' +
       (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
       '<video id="player" autoplay muted playsinline controls></video>';
-    playStream(b.media_url);
+    playStream(mediaSrc(b.media_url));
   }
 }
 
@@ -190,7 +196,13 @@ function esc(t) {
 async function sync() {
   const { data } = await api('sync', { device_code: deviceCode });
 
-  if (data.error === 'not_paired') { requestCode(); return; }
+  if (data.error === 'not_paired' || data.error === 'revoked') {
+    try { localStorage.removeItem('deviceCode'); } catch {}
+    deviceCode = null;
+    shownBroadcast = -1;
+    requestCode();
+    return;
+  }
 
   if (data.paired) {
     const b  = data.broadcast;

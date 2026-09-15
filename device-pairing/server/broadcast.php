@@ -1,196 +1,176 @@
 <?php
+declare(strict_types=1);
+require __DIR__ . '/config.php';
+require __DIR__ . '/_layout.php';
+
 /**
- * Broadcast portal. Whatever you send here appears on every paired screen
- * within a few seconds.
+ * Broadcast portal. Admin session required — the first account registered
+ * on a fresh install is the admin.
  *
- * Protected by ADMIN_KEY in config.php for the prototype. In production,
- * delete the key box and put this behind your real admin login:
- *
- *   session_start();
- *   if (empty($_SESSION['is_admin'])) { header('Location: /login.php'); exit; }
+ * Three ways to put media on screen:
+ *   paste a URL       any size, hosted wherever it already is
+ *   upload a clip     under UPLOAD_MAX_BYTES, stored in uploads/
+ *   (large films)     use a free external host and paste the URL
  */
-?>
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Broadcast Portal</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg:#F2F5F6; --card:#FFF; --ink:#16212A; --soft:#5C6D78; --line:#D8E0E4;
-    --accent:#17667E; --ok:#1F7A54; --bad:#B23B23; --ok-bg:#E4F3EC; --bad-bg:#FBE8E3;
-    --live:#1F7A54;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:#0F1518; --card:#182227; --ink:#E4ECEF; --soft:#9CB0B8; --line:#2A3840;
-      --accent:#58AFC9; --ok:#5BC495; --bad:#E58467; --ok-bg:#142A22; --bad-bg:#331F1B;
-      --live:#5BC495;
+
+$user = require_admin();
+$note = null;
+$bad  = null;
+
+const ALLOWED_TYPES = [
+    'video/mp4'  => 'mp4',
+    'video/webm' => 'webm',
+    'image/jpeg' => 'jpg',
+    'image/png'  => 'png',
+];
+
+/**
+ * Accept one uploaded file, safely. Returns the relative path to store, or an
+ * error string. Every check here is server-side; the browser's opinion of the
+ * file's type and size is not consulted.
+ */
+function accept_upload(array $f): array
+{
+    if ($f['error'] === UPLOAD_ERR_NO_FILE) return ['ok' => false, 'error' => null];
+    if ($f['error'] === UPLOAD_ERR_INI_SIZE || $f['error'] === UPLOAD_ERR_FORM_SIZE) {
+        return ['ok' => false, 'error' => 'That file is too large. The limit is ' . intdiv(UPLOAD_MAX_BYTES, 1024 * 1024) . ' MB.'];
     }
-  }
-  * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--ink); min-height:100vh;
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    padding:28px 20px 60px;
-  }
-  .page { max-width:56rem; margin:0 auto; }
-  h1 { font-size:1.5rem; margin:0 0 4px; }
-  .sub { color:var(--soft); font-size:.9375rem; margin:0 0 26px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(19rem,1fr)); gap:18px; align-items:start; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px; }
-  h2 { font-size:1.0625rem; margin:0 0 14px; }
-  label { display:block; font-size:.6875rem; font-weight:700; letter-spacing:.08em;
-          text-transform:uppercase; color:var(--soft); margin:14px 0 6px; }
-  label:first-of-type { margin-top:0; }
-  input, select, textarea {
-    width:100%; padding:10px 12px; font-size:.9375rem; font-family:inherit;
-    border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);
-  }
-  textarea { min-height:5rem; resize:vertical; }
-  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
-  button {
-    width:100%; margin-top:18px; padding:13px; font-size:.9375rem; font-weight:600;
-    background:var(--accent); color:#FFF; border:none; border-radius:9px; cursor:pointer;
-  }
-  button:hover { filter:brightness(1.08); }
-  button.ghost { background:transparent; color:var(--bad); border:1px solid var(--bad); margin-top:9px; }
-  button:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
-  .msg { margin-top:14px; padding:11px 14px; border-radius:8px; font-size:.875rem; }
-  .msg.ok { background:var(--ok-bg); color:var(--ok); }
-  .msg.bad { background:var(--bad-bg); color:var(--bad); }
-  .dev { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); font-size:.9375rem; }
-  .dev:last-child { border-bottom:none; }
-  .pip { width:8px; height:8px; border-radius:50%; background:var(--soft); flex:none; }
-  .pip.on { background:var(--live); box-shadow:0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); }
-  .dev .when { margin-left:auto; color:var(--soft); font-size:.8125rem; }
-  .empty { color:var(--soft); font-size:.9375rem; padding:10px 0; }
-  .livebox { background:var(--ok-bg); border:1px solid var(--ok); border-radius:9px; padding:13px 15px; font-size:.875rem; }
-  .livebox b { display:block; color:var(--ok); margin-bottom:3px; }
-  .hint { font-size:.8125rem; color:var(--soft); margin-top:10px; line-height:1.5; }
-</style>
-</head>
-<body>
-<div class="page">
-  <h1>Broadcast Portal</h1>
-  <p class="sub">Anything you send appears on every paired screen within about 8 seconds.</p>
+    if ($f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) {
+        return ['ok' => false, 'error' => 'Upload failed. Try again.'];
+    }
+    if ($f['size'] > UPLOAD_MAX_BYTES) {
+        return ['ok' => false, 'error' => 'That file is too large. The limit is ' . intdiv(UPLOAD_MAX_BYTES, 1024 * 1024) . ' MB.'];
+    }
 
-  <div class="grid">
+    // The real type comes from the bytes, never from the name or the header.
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']) ?: '';
+    if (!isset(ALLOWED_TYPES[$mime])) {
+        return ['ok' => false, 'error' => 'Only MP4, WebM, JPG and PNG files are accepted. This file is ' . $mime . '.'];
+    }
 
-    <div class="card">
-      <h2>Send a broadcast</h2>
+    // Random name. The uploaded name is never used for anything.
+    $name = bin2hex(random_bytes(16)) . '.' . ALLOWED_TYPES[$mime];
+    $dest = __DIR__ . '/uploads/' . $name;
+    if (!move_uploaded_file($f['tmp_name'], $dest)) {
+        return ['ok' => false, 'error' => 'Could not save the file. Is the uploads folder writable?'];
+    }
+    chmod($dest, 0644);
+    return ['ok' => true, 'path' => 'uploads/' . $name, 'kind' => str_starts_with($mime, 'video/') ? 'video' : 'image'];
+}
 
-      <label for="key">Admin key</label>
-      <input id="key" type="password" placeholder="ADMIN_KEY from config.php">
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && empty($_POST)
+    && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    // PHP dropped the whole body because it exceeded post_max_size, so the
+    // CSRF token is gone too. Say what actually happened instead of "bad token".
+    $bad = 'That file is too large for this server to accept. '
+         . 'The limit is ' . intdiv(UPLOAD_MAX_BYTES, 1024 * 1024) . ' MB, '
+         . 'and the server may cap it lower still. Host large video elsewhere and paste the URL.';
+}
+elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    $type  = (string) ($_POST['type'] ?? 'message');
+    $title = substr(trim((string) ($_POST['title'] ?? '')), 0, 120);
+    $body  = substr(trim((string) ($_POST['body'] ?? '')), 0, 600);
+    $url   = trim((string) ($_POST['media_url'] ?? ''));
+
+    if (!in_array($type, ['message', 'video', 'image', 'off'], true)) {
+        $bad = 'Unknown broadcast type.';
+    } else {
+        // An uploaded file wins over a pasted URL, and sets the type itself.
+        if (!empty($_FILES['media']) && $_FILES['media']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $up = accept_upload($_FILES['media']);
+            if (!$up['ok']) {
+                $bad = $up['error'];
+            } else {
+                $url  = $up['path'];
+                $type = $up['kind'];
+            }
+        } elseif (($type === 'video' || $type === 'image')) {
+            if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL) || !preg_match('#^https?://#i', $url)) {
+                $bad = 'Paste a full https:// URL, or upload a file.';
+            }
+        }
+
+        if ($bad === null) {
+            db()->prepare('INSERT INTO broadcasts (type, title, body, media_url, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([$type, $title, $body, $url, $user['id'], time()]);
+            $note = $type === 'off' ? 'Broadcast stopped. Screens return to idle.' : 'Sent to every paired screen.';
+        }
+    }
+}
+
+$live = current_broadcast();
+$devs = db()->query(
+    "SELECT d.device_name, d.paired_at, d.last_seen, u.email
+       FROM device_codes d LEFT JOIN users u ON u.id = d.user_id
+      WHERE d.status = 'paired' AND d.revoked_at IS NULL
+   ORDER BY d.paired_at DESC LIMIT 100"
+)->fetchAll();
+
+page_top('Broadcast', $user);
+?>
+<div class="grid" style="max-width:56rem;margin:0 auto">
+
+  <div class="card">
+    <h1>Send a broadcast</h1>
+    <p class="lead">Appears on every paired screen within about 8 seconds.</p>
+    <form method="post" enctype="multipart/form-data">
+      <?= csrf_field() ?>
+      <input type="hidden" name="MAX_FILE_SIZE" value="<?= UPLOAD_MAX_BYTES ?>">
 
       <label for="type">What to show</label>
-      <select id="type">
+      <select id="type" name="type">
         <option value="message">Message on screen</option>
-        <option value="video">Play a video (HLS or MP4)</option>
-        <option value="image">Show an image</option>
+        <option value="video">Video from a URL</option>
+        <option value="image">Image from a URL</option>
       </select>
 
       <label for="title">Title</label>
-      <input id="title" placeholder="Match starts in 10 minutes">
+      <input id="title" name="title" placeholder="Match starts in 10 minutes">
 
       <label for="body">Message</label>
-      <textarea id="body" placeholder="Shown under the title"></textarea>
+      <textarea id="body" name="body" placeholder="Shown under the title"></textarea>
 
-      <label for="url">Media URL <span style="text-transform:none;font-weight:400">— for video or image</span></label>
-      <input id="url" placeholder="https://example.com/stream.m3u8">
+      <label for="media_url">Media URL</label>
+      <input id="media_url" name="media_url" placeholder="https://example.com/clip.mp4">
 
-      <button id="send">Broadcast now</button>
-      <button id="stop" class="ghost">Stop broadcast</button>
-      <div id="msg"></div>
-    </div>
+      <label for="media">Or upload a file <span style="text-transform:none;font-weight:400">— MP4, WebM, JPG, PNG, up to <?= intdiv(UPLOAD_MAX_BYTES, 1024*1024) ?> MB</span></label>
+      <input id="media" name="media" type="file" accept="video/mp4,video/webm,image/jpeg,image/png">
 
-    <div class="card">
-      <h2>Live now</h2>
-      <div id="live"><div class="empty">Nothing is being broadcast.</div></div>
-
-      <h2 style="margin-top:24px">Paired devices</h2>
-      <div id="devices"><div class="empty">Enter your admin key to load devices.</div></div>
-      <p class="hint">A green dot means that screen checked in within the last 30 seconds.</p>
-    </div>
-
+      <button type="submit">Broadcast now</button>
+    </form>
+    <form method="post">
+      <?= csrf_field() ?>
+      <input type="hidden" name="type" value="off">
+      <button class="ghost" type="submit">Stop broadcast</button>
+    </form>
+    <?php if ($note): ?><div class="msg ok"><?= e($note) ?></div><?php endif; ?>
+    <?php if ($bad):  ?><div class="msg bad"><?= e($bad) ?></div><?php endif; ?>
+    <p class="hint">A full-length film will not fit the upload limit on free hosting.
+       Host it on a free video service and paste the URL instead.</p>
   </div>
+
+  <div class="card">
+    <h2>Live now</h2>
+    <?php if ($live): ?>
+      <div class="msg ok" style="margin:0 0 20px"><b><?= e(strtoupper($live['type'])) ?></b><?= e($live['title'] ?: '(no title)') ?></div>
+    <?php else: ?>
+      <div class="empty" style="margin-bottom:12px">Nothing is being broadcast.</div>
+    <?php endif; ?>
+
+    <h2>Paired screens</h2>
+    <?php if (!$devs): ?>
+      <div class="empty">No devices paired yet.</div>
+    <?php else: foreach ($devs as $d):
+        $on = $d['last_seen'] !== null && (time() - (int) $d['last_seen']) < 30; ?>
+      <div class="row">
+        <span class="pip <?= $on ? 'on' : '' ?>"></span>
+        <div class="grow"><?= e($d['device_name']) ?><span class="sub"><?= e($d['email'] ?? 'no account') ?></span></div>
+      </div>
+    <?php endforeach; endif; ?>
+    <p class="hint">Green means that screen checked in within the last 30 seconds.</p>
+  </div>
+
 </div>
-
-<script>
-const $ = id => document.getElementById(id);
-const msg = (kind, text) => { $('msg').innerHTML = '<div class="msg ' + kind + '">' + text + '</div>'; };
-
-// Remember the key for this tab only, so you're not retyping it constantly.
-$('key').value = sessionStorage.getItem('adminKey') || '';
-$('key').addEventListener('input', () => sessionStorage.setItem('adminKey', $('key').value));
-
-const api = (action, body) =>
-  fetch('api.php?action=' + action, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
-
-async function send(type) {
-  const key = $('key').value.trim();
-  if (!key) return msg('bad', 'Enter your admin key first.');
-
-  const data = await api('send', {
-    admin_key: key,
-    type,
-    title: $('title').value,
-    body: $('body').value,
-    media_url: $('url').value.trim()
-  });
-
-  if (data.ok) {
-    msg('ok', type === 'off' ? 'Broadcast stopped. Screens return to idle.' : 'Sent to all paired screens.');
-    refresh();
-  } else if (data.error === 'unauthorised') {
-    msg('bad', 'Wrong admin key.');
-  } else if (data.error === 'bad_url') {
-    msg('bad', 'That media URL is not valid. Include https://');
-  } else {
-    msg('bad', 'Could not send. Is the server running?');
-  }
-}
-
-$('send').addEventListener('click', () => send($('type').value));
-$('stop').addEventListener('click', () => send('off'));
-
-function ago(ts) {
-  if (!ts) return 'never';
-  const s = Math.floor(Date.now() / 1000) - ts;
-  if (s < 60)   return s + 's ago';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  return Math.floor(s / 3600) + 'h ago';
-}
-
-async function refresh() {
-  const key = $('key').value.trim();
-  if (!key) return;
-
-  const data = await api('devices', { admin_key: key });
-  if (!data.ok) return;
-
-  $('live').innerHTML = data.live
-    ? '<div class="livebox"><b>' + (data.live.type).toUpperCase() + '</b>' +
-      (data.live.title || '(no title)') + '</div>'
-    : '<div class="empty">Nothing is being broadcast.</div>';
-
-  $('devices').innerHTML = data.devices.length
-    ? data.devices.map(d =>
-        '<div class="dev"><span class="pip ' + (d.online ? 'on' : '') + '"></span>' +
-        '<span>' + d.device_name + '</span>' +
-        '<span class="when">' + ago(d.last_seen) + '</span></div>'
-      ).join('')
-    : '<div class="empty">No devices paired yet.</div>';
-}
-
-refresh();
-setInterval(refresh, 5000);
-</script>
-</body>
-</html>
+<?php page_bottom();
