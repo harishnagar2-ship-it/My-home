@@ -4,9 +4,12 @@ declare(strict_types=1);
 /**
  * The whole API, three actions:
  *
- *   POST api.php?action=new      device asks for a code
- *   POST api.php?action=poll     device asks "am I paired yet?"
- *   POST api.php?action=verify   your website submits the code a human typed
+ *   POST api.php?action=new        device asks for a code
+ *   POST api.php?action=poll       device asks "am I paired yet?"
+ *   POST api.php?action=verify     your website submits the code a human typed
+ *   POST api.php?action=sync       paired device asks "what should I show?"
+ *   POST api.php?action=send       portal starts a broadcast          (admin)
+ *   POST api.php?action=devices    portal lists paired devices        (admin)
  *
  * Error strings follow RFC 8628 so this stays swappable with a real
  * OAuth device-flow server later.
@@ -113,6 +116,79 @@ switch ($action) {
             ->execute([time(), $row['device_code']]);
 
         json_out(['ok' => true, 'device_name' => $row['device_name']]);
+    }
+
+    /* ---------- 4. Paired device asks what to show ---------- */
+    case 'sync': {
+        $stmt = db()->prepare('SELECT * FROM device_codes WHERE device_code = ?');
+        $stmt->execute([(string) ($body['device_code'] ?? '')]);
+        $row = $stmt->fetch();
+
+        if (!$row || $row['status'] !== 'paired') {
+            json_out(['error' => 'not_paired'], 401);
+        }
+
+        // Heartbeat, so the portal can show which screens are actually alive.
+        db()->prepare('UPDATE device_codes SET last_seen = ? WHERE device_code = ?')
+            ->execute([time(), $row['device_code']]);
+
+        json_out([
+            'paired'      => true,
+            'device_name' => $row['device_name'],
+            'broadcast'   => current_broadcast(),
+        ]);
+    }
+
+    /* ---------- 5. Portal starts a broadcast ---------- */
+    case 'send': {
+        if (!admin_ok((string) ($body['admin_key'] ?? ''))) {
+            json_out(['ok' => false, 'error' => 'unauthorised'], 401);
+        }
+
+        $type = (string) ($body['type'] ?? 'message');
+        if (!in_array($type, ['message', 'video', 'image', 'off'], true)) {
+            json_out(['ok' => false, 'error' => 'bad_type'], 400);
+        }
+
+        $url = trim((string) ($body['media_url'] ?? ''));
+        if ($url !== '' && !filter_var($url, FILTER_VALIDATE_URL)) {
+            json_out(['ok' => false, 'error' => 'bad_url'], 400);
+        }
+
+        db()->prepare(
+            'INSERT INTO broadcasts (type, title, body, media_url, created_at)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([
+            $type,
+            substr(trim((string) ($body['title'] ?? '')), 0, 120),
+            substr(trim((string) ($body['body'] ?? '')), 0, 600),
+            $url,
+            time(),
+        ]);
+
+        json_out(['ok' => true, 'broadcast' => current_broadcast()]);
+    }
+
+    /* ---------- 6. Portal lists paired devices ---------- */
+    case 'devices': {
+        if (!admin_ok((string) ($body['admin_key'] ?? ''))) {
+            json_out(['ok' => false, 'error' => 'unauthorised'], 401);
+        }
+
+        $rows = db()->query(
+            "SELECT device_name, paired_at, last_seen
+               FROM device_codes
+              WHERE status = 'paired'
+           ORDER BY paired_at DESC
+              LIMIT 100"
+        )->fetchAll();
+
+        $now = time();
+        foreach ($rows as &$r) {
+            $r['online'] = $r['last_seen'] !== null && ($now - (int) $r['last_seen']) < 30;
+        }
+
+        json_out(['ok' => true, 'devices' => $rows, 'live' => current_broadcast()]);
     }
 
     default:

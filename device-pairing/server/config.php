@@ -19,6 +19,19 @@ const ATTEMPT_WINDOW      = 300;  // ...within this many seconds
 const CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
 
 /**
+ * Password for the broadcast portal.
+ *
+ * Prototype-grade on purpose: one shared secret, compared in constant time.
+ * For production, replace this with your real admin login and a session check.
+ */
+const ADMIN_KEY = 'change-this-before-you-deploy';
+
+function admin_ok(string $given): bool
+{
+    return hash_equals(ADMIN_KEY, $given);
+}
+
+/**
  * Origins allowed to call this API from a browser.
  *
  * The device page lives on a different host (Netlify, GitHub Pages, another
@@ -77,7 +90,18 @@ function db(): PDO
             device_name  TEXT,
             paired_at    INTEGER,
             expires_at   INTEGER NOT NULL,
-            created_at   INTEGER NOT NULL
+            created_at   INTEGER NOT NULL,
+            last_seen    INTEGER
+        )
+    ');
+    $pdo->exec('
+        CREATE TABLE IF NOT EXISTS broadcasts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            type       TEXT NOT NULL,          -- message | video | image | off
+            title      TEXT,
+            body       TEXT,
+            media_url  TEXT,
+            created_at INTEGER NOT NULL
         )
     ');
     $pdo->exec('
@@ -145,6 +169,24 @@ function purge_expired(): void
 {
     db()->prepare("DELETE FROM device_codes WHERE expires_at < ? AND status = 'pending'")
         ->execute([time()]);
+}
+
+/** The most recent broadcast, or null if nothing is live. */
+function current_broadcast(): ?array
+{
+    $row = db()->query('SELECT * FROM broadcasts ORDER BY id DESC LIMIT 1')->fetch();
+
+    if (!$row || $row['type'] === 'off') {
+        return null;
+    }
+
+    return [
+        'id'        => (int) $row['id'],
+        'type'      => $row['type'],
+        'title'     => $row['title'],
+        'body'      => $row['body'],
+        'media_url' => $row['media_url'],
+    ];
 }
 
 function json_out(array $payload, int $status = 200): never

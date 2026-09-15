@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">StreamBox</string>
+
+    <!--
+        CHANGE THIS to your deployed device page, then rebuild.
+        It must be https — cleartext http is blocked by usesCleartextTraffic="false".
+    -->
+    <string name="app_url">https://your-device-page.netlify.app/app.html</string>
+</resources>

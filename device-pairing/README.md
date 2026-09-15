@@ -22,8 +22,9 @@ Then open **two tabs**:
 
 | Tab | URL | What it is |
 |---|---|---|
-| 1 | http://localhost:8001/index.html | The TV. Shows the code. |
+| 1 | http://localhost:8001/app.html | The TV. Shows the code. |
 | 2 | http://localhost:8000/activate.php | Your website. Type the code here. |
+| 3 | http://localhost:8000/broadcast.php | The portal. Push content to paired screens. |
 
 To put these on real servers, see **DEPLOY.md**.
 
@@ -42,8 +43,11 @@ No database setup needed — it creates `pairing.sqlite` on first run.
 | `server/config.php` | Database, schema, code generation, rate limiting, CORS allowlist |
 | `server/api.php` | The three endpoints: `new`, `poll`, `verify` |
 | `server/activate.php` | The pairing form — drop this into your existing site |
-| `device/index.html` | The TV screen — static, deploys anywhere |
+| `server/broadcast.php` | Broadcast portal — push content to every paired screen |
+| `device/index.html` | Landing page with the APK download button |
+| `device/app.html` | The TV screen itself — pairs, then shows broadcasts |
 | `device/config.js` | The one file you edit when deploying: where the API lives |
+| `android/` | Android TV WebView wrapper — builds to an installable APK |
 
 ## The API
 

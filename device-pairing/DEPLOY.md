@@ -155,3 +155,105 @@ In order of how often it is the cause:
 2. `API_BASE` has a trailing slash, or points at `api.php` instead of its folder
 3. Mixed content — the page is https and `API_BASE` is http
 4. The PHP folder is not writable so SQLite cannot create its file
+
+---
+
+# The Android TV app
+
+## Why it is a WebView
+
+The TV app is a thin Android wrapper around `device/app.html`. Pairing,
+polling and broadcast playback already live in that page, so the Android side
+has one job: give it a browser that behaves on a television.
+
+That means **you change the web page and every installed TV updates itself** —
+no rebuild, no reinstall, no app store review.
+
+## Build the APK without installing anything
+
+The repo has `.github/workflows/build-tv-apk.yml`. Push the project to GitHub and:
+
+1. Go to the **Actions** tab
+2. Open **Build Android TV APK** → **Run workflow**
+3. When it finishes, download the **streambox-tv-apk** artifact
+4. Unzip it and put `streambox-tv.apk` next to `index.html` in your Netlify folder
+
+The Download button on your landing page then serves it. To point it elsewhere,
+set `window.APK_URL` in `config.js`.
+
+Prefer Android Studio? Open `device-pairing/android`, then **Build → Build APK**.
+
+## Before you build — change one line
+
+`android/app/src/main/res/values/strings.xml`:
+
+```xml
+<string name="app_url">https://your-device-page.netlify.app/app.html</string>
+```
+
+It must be **https**. The manifest sets `usesCleartextTraffic="false"`, so a
+plain http address loads a blank screen.
+
+## Three Android TV details that matter
+
+**`LEANBACK_LAUNCHER`** in the manifest is what puts the app in the Android TV
+apps row. Without it the app installs and then appears nowhere.
+
+**`android:required="false"` on `hardware.touchscreen`.** Android assumes a
+touchscreen unless told otherwise, and TVs do not have one. Miss this and the
+Play Store hides the app from every TV.
+
+**`domStorageEnabled = true`** in `MainActivity.kt`. The page keeps its
+`device_code` in `localStorage` so the TV stays paired across reboots. Without
+it, the viewer is asked for a new code every single launch.
+
+## Installing it on a real TV
+
+1. TV **Settings → Device Preferences → Security → Unknown sources** → on
+2. Install **Downloader** from the Play Store or Amazon Appstore
+3. In Downloader, type your Netlify address and press Go
+4. Tap **Download for Android TV**, then **Install**
+
+The APK from the workflow is **debug-signed**. That installs fine by sideload
+and is correct for a project demo. For public distribution you would generate a
+release keystore and sign properly.
+
+---
+
+# The broadcast portal
+
+`server/broadcast.php` pushes content to every paired screen. Open it, enter
+your admin key, choose what to show, press **Broadcast now**. Screens pick it
+up on their next sync, which is 8 seconds by default (`SYNC_SECONDS` in
+`config.js`).
+
+| Type | What the TV does |
+|---|---|
+| Message | Full-screen title and body text |
+| Video | Plays the URL — HLS `.m3u8` or plain MP4 |
+| Image | Shows the image full screen |
+| Stop | Returns every screen to the idle "Ready" state |
+
+The portal also lists paired devices with a live dot — green means that screen
+checked in within the last 30 seconds. Useful for proving during a demo that
+the TV really is connected.
+
+**Change `ADMIN_KEY` in `config.php` before you deploy.** The shipped value is
+a placeholder. Better still, delete the key box and put `broadcast.php` behind
+your real admin login:
+
+```php
+session_start();
+if (empty($_SESSION['is_admin'])) { header('Location: /login.php'); exit; }
+```
+
+## How broadcast delivery works
+
+The TV polls `api.php?action=sync` every 8 seconds and compares the broadcast
+`id` it gets back against the one it is showing. Different id means render the
+new one; same id means do nothing.
+
+That is deliberately simple and it scales badly — 1,000 screens is 125 requests
+a second. For a real deployment you would replace polling with WebSockets or
+server-sent events so the server pushes instead. That is the single best
+"future work" item in this project.

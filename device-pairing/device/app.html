@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreamBox — Device Setup</title>
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: #0B1015; color: #E8EEF2;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .screen { width: 100%; max-width: 760px; text-align: center; }
+  .brand {
+    font-size: .75rem; letter-spacing: .3em; text-transform: uppercase;
+    color: #5AA9C7; font-weight: 700;
+  }
+  h1 { font-size: clamp(1.4rem, 4vw, 2.1rem); font-weight: 600; margin: 14px 0 6px; }
+  .lead { color: #9AAAB4; font-size: 1rem; margin: 0 0 30px; line-height: 1.6; }
+  .lead b { color: #E8EEF2; }
+
+  .code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: clamp(2.4rem, 11vw, 4.6rem);
+    font-weight: 700; letter-spacing: .1em;
+    background: #131C24; border: 2px solid #23323D; border-radius: 12px;
+    padding: 22px 16px; margin: 0 auto; max-width: 560px;
+    word-break: break-all;
+  }
+  .expiry { color: #7E9099; font-size: .875rem; margin-top: 14px; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-top: 28px; font-size: .9375rem; color: #9AAAB4;
+  }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: #5AA9C7;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .25 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; opacity: .8 } }
+
+  .ok .code { border-color: #2E7D5B; background: #10231B; }
+  .tick { font-size: 3rem; color: #4FC08D; line-height: 1; }
+  h2 { font-size: 1.5rem; margin: 14px 0 6px; }
+
+  video {
+    width: 100%; max-width: 100%; margin-top: 26px;
+    border-radius: 10px; background: #000; aspect-ratio: 16/9;
+  }
+  .err { color: #E5876A; }
+  h1.big { font-size: clamp(2rem, 6vw, 3.4rem); line-height: 1.1; margin-bottom: 18px; }
+  .lead.big-body { font-size: clamp(1rem, 2.4vw, 1.5rem); max-width: 40ch; margin-inline: auto; }
+  img.shot {
+    max-width: 100%; max-height: 70vh; border-radius: 10px; margin-top: 20px;
+    object-fit: contain;
+  }
+  code.mono {
+    font-family: ui-monospace, Menlo, monospace; font-size: .875rem;
+    background: #131C24; padding: 2px 7px; border-radius: 4px; color: #C9D6DD;
+  }
+  button {
+    margin-top: 20px; background: #1B4A5C; color: #E8EEF2;
+    border: 1px solid #2B6B83; border-radius: 8px;
+    padding: 11px 20px; font-size: .9375rem; cursor: pointer;
+  }
+  button:hover { background: #235E75; }
+  button:focus-visible { outline: 2px solid #5AA9C7; outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="screen" id="screen">
+  <div class="brand">StreamBox</div>
+  <h1>Starting up…</h1>
+</div>
+
+<script>
+const API_BASE      = (window.API_BASE || '').replace(/\/$/, '');
+const SYNC_INTERVAL = (window.SYNC_SECONDS || 8) * 1000;
+const screen        = document.getElementById('screen');
+
+let deviceName     = 'this device';
+let shownBroadcast = -1;
+let deviceCode = null;
+let interval   = 5;
+let expiresAt  = 0;
+let timer      = null;
+
+function api(action, body) {
+  return fetch(API_BASE + '/api.php?action=' + action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  })
+  .then(async r => ({ status: r.status, data: await r.json() }))
+  .catch(() => ({ status: 0, data: { error: 'network_error' } }));
+}
+
+function tickExpiry() {
+  const el = document.getElementById('expiry');
+  if (!el) return;
+  const left = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+  const m = String(Math.floor(left / 60)).padStart(2, '0');
+  const s = String(left % 60).padStart(2, '0');
+  el.textContent = left > 0
+    ? 'This code expires in ' + m + ':' + s
+    : 'Code expired — getting a new one…';
+}
+
+function renderCode(userCode) {
+  const where = window.ACTIVATE_URL || 'your website';
+  screen.className = 'screen';
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1>Enter this code to activate</h1>' +
+    '<p class="lead">On your phone or computer, go to <b>' + where + '</b><br>and type the code below.</p>' +
+    '<div class="code">' + userCode + '</div>' +
+    '<div class="expiry" id="expiry"></div>' +
+    '<div class="status"><span class="dot"></span><span>Waiting for activation…</span></div>';
+  tickExpiry();
+}
+
+function renderPaired(name) {
+  clearInterval(timer);
+  deviceName = name || 'this device';
+  screen.className = 'screen ok';
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<div class="tick">&#10003;</div>' +
+    '<h2>Your device has been paired</h2>' +
+    '<p class="lead">Signed in as <b>' + deviceName + '</b></p>';
+
+  // Hand over to the broadcast loop.
+  setTimeout(sync, 1500);
+}
+
+/* ---------- broadcast display ---------- */
+
+function renderIdle() {
+  screen.className = 'screen';
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1>Ready</h1>' +
+    '<p class="lead">' + deviceName + ' is connected.<br>Waiting for the next broadcast…</p>' +
+    '<div class="status"><span class="dot"></span><span>Listening</span></div>';
+}
+
+function renderBroadcast(b) {
+  screen.className = 'screen';
+
+  if (b.type === 'message') {
+    screen.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      '<h1 class="big">' + esc(b.title || '') + '</h1>' +
+      '<p class="lead big-body">' + esc(b.body || '') + '</p>';
+    return;
+  }
+
+  if (b.type === 'image') {
+    screen.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
+      '<img class="shot" src="' + encodeURI(b.media_url || '') + '" alt="">';
+    return;
+  }
+
+  if (b.type === 'video') {
+    screen.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
+      '<video id="player" autoplay muted playsinline controls></video>';
+    playStream(b.media_url);
+  }
+}
+
+/** Broadcast text is typed by an admin, so escape it before it hits innerHTML. */
+function esc(t) {
+  return String(t).replace(/[&<>"']/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  ));
+}
+
+async function sync() {
+  const { data } = await api('sync', { device_code: deviceCode });
+
+  if (data.error === 'not_paired') { requestCode(); return; }
+
+  if (data.paired) {
+    const b  = data.broadcast;
+    const id = b ? b.id : 0;
+
+    if (id !== shownBroadcast) {
+      shownBroadcast = id;
+      b ? renderBroadcast(b) : renderIdle();
+    }
+  }
+
+  setTimeout(sync, SYNC_INTERVAL);
+}
+
+function renderRefused() {
+  clearInterval(timer);
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1 class="err">Activation refused</h1>' +
+    '<p class="lead">Ask the account holder to try again.</p>' +
+    '<button onclick="requestCode()">Get a new code</button>';
+}
+
+function renderUnreachable() {
+  clearInterval(timer);
+  screen.innerHTML =
+    '<div class="brand">StreamBox</div>' +
+    '<h1 class="err">Cannot reach the server</h1>' +
+    '<p class="lead">Tried <code class="mono">' + (API_BASE || '(API_BASE not set)') + '</code><br><br>' +
+    'Check two things: <b>API_BASE</b> in config.js points at your PHP host, and this page\'s ' +
+    'address is listed in <b>ALLOWED_ORIGINS</b> in config.php.</p>' +
+    '<button onclick="requestCode()">Try again</button>';
+}
+
+function playStream(url) {
+  const video = document.getElementById('player');
+  if (!video || !url) return;
+
+  const isHls = /\.m3u8(\?|$)/i.test(url);
+
+  if (isHls && window.Hls && Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(url);
+    hls.attachMedia(video);
+  } else {
+    // Native HLS on Safari/tvOS, or a plain MP4 anywhere.
+    video.src = url;
+  }
+}
+
+async function requestCode() {
+  const res = await api('new', { device_name: 'Living Room TV' });
+
+  if (!res.data || !res.data.device_code) {
+    renderUnreachable();
+    return;
+  }
+
+  deviceCode = res.data.device_code;
+  try { localStorage.setItem('deviceCode', deviceCode); } catch {}
+  interval   = res.data.interval || 5;
+  expiresAt  = Math.floor(Date.now() / 1000) + res.data.expires_in;
+
+  renderCode(res.data.user_code);
+
+  clearInterval(timer);
+  timer = setInterval(tickExpiry, 1000);
+  setTimeout(poll, interval * 1000);
+}
+
+async function poll() {
+  if (!deviceCode) return;
+  const { data } = await api('poll', { device_code: deviceCode });
+
+  if (data.status === 'paired')       { renderPaired(data.device_name); return; }
+  if (data.error === 'access_denied') { renderRefused(); return; }
+  if (data.error === 'expired_token') { requestCode(); return; }
+
+  // authorization_pending, or a temporary network blip — keep waiting.
+  setTimeout(poll, interval * 1000);
+}
+
+/* A TV is unplugged and plugged back in constantly. Remember the pairing so
+   the viewer is not asked for a new code every single time. */
+const saved = (() => { try { return localStorage.getItem('deviceCode'); } catch { return null; } })();
+
+if (saved) {
+  deviceCode = saved;
+  sync();
+} else {
+  requestCode();
+}
+</script>
+</body>
+</html>

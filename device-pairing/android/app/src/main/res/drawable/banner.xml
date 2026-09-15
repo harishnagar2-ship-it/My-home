@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV requires a 320x180 banner. Vector so there are no binary assets
+     in the repo; replace with a real PNG before you ship anything public. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <path
+        android:fillColor="#123A47"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <path
+        android:fillColor="#8FC4D4"
+        android:pathData="M40,86h26v14h-26z M78,72h16v42h-16z M106,86h34v14h-34z
+                          M152,64h18v58h-18z M182,86h22v14h-22z M216,74h14v38h-14z
+                          M242,86h38v14h-38z" />
+</vector>
