@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreamBox — Live Demo</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#0B1015; --panel:#131C24; --line:#23323D; --ink:#E8EEF2; --soft:#9AAAB4;
+    --accent:#5AA9C7; --accent-deep:#1B4A5C; --ok:#4FC08D; --bad:#E5876A;
+    --ok-bg:#10231B; --bad-bg:#2A1713;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    padding:18px 16px 60px;
+  }
+  .page { max-width:52rem; margin:0 auto; }
+  .top { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  .brand { font-size:.6875rem; letter-spacing:.3em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  .tabs { display:flex; gap:4px; background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:4px; }
+  .tabs button {
+    background:transparent; border:none; color:var(--soft); cursor:pointer; font-family:inherit;
+    font-size:.8125rem; font-weight:600; padding:8px 14px; border-radius:6px;
+  }
+  .tabs button[aria-selected="true"] { background:var(--accent-deep); color:var(--ink); }
+  .tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+  .howto {
+    background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:8px; padding:13px 16px; margin:14px 0 22px;
+    font-size:.875rem; line-height:1.6; color:var(--soft);
+  }
+  .howto b { color:var(--ink); }
+
+  .stage {
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    min-height:23rem; padding:34px 26px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+  }
+  h1 { font-size:clamp(1.3rem,4vw,1.9rem); margin:12px 0 6px; font-weight:600; }
+  h1.big { font-size:clamp(1.7rem,5.5vw,2.8rem); line-height:1.12; }
+  .lead { color:var(--soft); font-size:.9375rem; line-height:1.6; margin:0 0 22px; max-width:32rem; }
+  .lead.big-body { font-size:clamp(.95rem,2.2vw,1.25rem); }
+
+  .code {
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-size:clamp(2rem,9vw,3.6rem); font-weight:700; letter-spacing:.1em;
+    background:var(--bg); border:2px solid var(--line); border-radius:12px;
+    padding:18px 14px; margin:6px 0 0; max-width:100%; word-break:break-all;
+  }
+  .status { display:inline-flex; align-items:center; gap:9px; margin-top:22px; font-size:.875rem; color:var(--soft); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.25} 50%{opacity:1} }
+  @media (prefers-reduced-motion:reduce){ .dot{animation:none;opacity:.8} }
+  .tick { font-size:2.6rem; color:var(--ok); line-height:1; }
+
+  form { width:100%; max-width:22rem; }
+  label { display:block; font-size:.6875rem; font-weight:700; letter-spacing:.08em;
+          text-transform:uppercase; color:var(--soft); margin:0 0 7px; text-align:left; }
+  input, select, textarea {
+    width:100%; padding:11px 13px; font-family:inherit; font-size:.9375rem;
+    border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);
+  }
+  input#code {
+    font-family:ui-monospace,Menlo,monospace; font-size:1.5rem; font-weight:700;
+    letter-spacing:.12em; text-align:center; text-transform:uppercase; padding:14px 10px;
+  }
+  textarea { min-height:4.2rem; resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
+  .row { text-align:left; }
+  .row + .row { margin-top:14px; }
+  button.go {
+    width:100%; margin-top:16px; padding:13px; font-size:.9375rem; font-weight:600;
+    background:var(--accent-deep); color:var(--ink); border:1px solid #2B6B83;
+    border-radius:9px; cursor:pointer; font-family:inherit;
+  }
+  button.go:hover { background:#235E75; }
+  button.go.ghost { background:transparent; border-color:#4A2E28; color:var(--bad); margin-top:9px; }
+  button.go:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .msg { margin-top:16px; padding:12px 15px; border-radius:8px; font-size:.875rem; line-height:1.5; text-align:left; }
+  .msg.ok  { background:var(--ok-bg);  color:var(--ok);  border:1px solid #2E7D5B; }
+  .msg.bad { background:var(--bad-bg); color:var(--bad); border:1px solid #6B3A2C; }
+  .msg b { display:block; margin-bottom:2px; }
+
+  .devices { width:100%; max-width:24rem; text-align:left; margin-top:26px; }
+  .devices h2 { font-size:.8125rem; text-transform:uppercase; letter-spacing:.08em; color:var(--soft); margin:0 0 8px; }
+  .dev { display:flex; align-items:center; gap:9px; padding:9px 0; border-bottom:1px solid var(--line); font-size:.875rem; }
+  .dev:last-child { border-bottom:none; }
+  .pip { width:7px; height:7px; border-radius:50%; background:var(--ok); flex:none; }
+  .empty { color:var(--soft); font-size:.875rem; padding:8px 0; }
+
+  .foot { margin-top:20px; font-size:.8125rem; color:var(--soft); line-height:1.6; }
+  .foot a { color:var(--accent); }
+  .foot code { font-family:ui-monospace,Menlo,monospace; background:var(--panel); padding:2px 6px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <span class="brand">StreamBox &middot; Demo</span>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-tv"     aria-selected="true"  data-v="tv">TV screen</button>
+      <button role="tab" id="tab-site"   aria-selected="false" data-v="site">Your website</button>
+      <button role="tab" id="tab-portal" aria-selected="false" data-v="portal">Broadcast portal</button>
+    </div>
+  </div>
+
+  <div class="howto">
+    <b>Open this page in two tabs.</b> Leave one on <b>TV screen</b>, switch the other to
+    <b>Your website</b> and type the code across. Then use <b>Broadcast portal</b> to push
+    something to the TV.
+  </div>
+
+  <div class="stage" id="stage"><h1>Starting…</h1></div>
+  <p class="foot" id="foot"></p>
+</div>
+
+<script>
+/*
+ * Demo build. No server.
+ *
+ * State lives in localStorage and changes are announced over BroadcastChannel,
+ * so tabs on this same browser behave like separate devices talking to one API.
+ * The real version in server/ does this properly over HTTP, which also works
+ * between different machines — something this file cannot do.
+ */
+
+const ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
+const KEY      = 'streambox-demo';
+const chan     = 'BroadcastChannel' in window ? new BroadcastChannel(KEY) : null;
+
+const $     = id => document.getElementById(id);
+const stage = $('stage');
+let view    = 'tv';
+
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+/* writeState re-renders, which replaces #msg. Always look the node up again
+   at the moment of writing, never hold a reference across a state change. */
+function showMsg(kind, title, text) {
+  const el = $('msg');
+  if (el) el.innerHTML = '<div class="msg ' + kind + '"><b>' + title + '</b>' + text + '</div>';
+}
+
+function readState() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || { devices:{}, broadcast:null }; }
+  catch { return { devices:{}, broadcast:null }; }
+}
+function writeState(s) {
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+  chan && chan.postMessage('changed');
+  render();
+}
+
+function makeCode() {
+  const a = new Uint32Array(8); crypto.getRandomValues(a);
+  let s = ''; for (let i=0;i<8;i++) s += ALPHABET[a[i] % ALPHABET.length];
+  return s.slice(0,4) + '-' + s.slice(4);
+}
+const normalise = raw => {
+  const c = String(raw).toUpperCase().replace(/[^A-Z]/g,'').slice(0,8);
+  return c.length === 8 ? c.slice(0,4) + '-' + c.slice(4) : c;
+};
+
+/* This tab's own identity as a "device". */
+let myCode = sessionStorage.getItem(KEY + '-code');
+if (!myCode) {
+  myCode = makeCode();
+  sessionStorage.setItem(KEY + '-code', myCode);
+  const s = readState();
+  s.devices[myCode] = { name:'Living Room TV', status:'pending' };
+  writeState(s);
+}
+
+/* ---------- views ---------- */
+
+function drawTv() {
+  const s   = readState();
+  const dev = s.devices[myCode];
+
+  if (!dev || dev.status !== 'paired') {
+    stage.innerHTML =
+      '<h1>Enter this code to activate</h1>' +
+      '<p class="lead">Open the <b>Your website</b> tab and type this code.</p>' +
+      '<div class="code">' + myCode + '</div>' +
+      '<div class="status"><span class="dot"></span><span>Waiting for activation…</span></div>';
+    $('foot').innerHTML = 'Start over: <code>sessionStorage.clear()</code> then reload this tab.';
+    return;
+  }
+
+  const b = s.broadcast;
+  if (!b || b.type === 'off') {
+    stage.innerHTML =
+      '<div class="tick">&#10003;</div>' +
+      '<h1>Ready</h1>' +
+      '<p class="lead">' + esc(dev.name) + ' is connected.<br>Waiting for the next broadcast…</p>' +
+      '<div class="status"><span class="dot"></span><span>Listening</span></div>';
+    return;
+  }
+
+  if (b.type === 'message') {
+    stage.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      '<h1 class="big">' + esc(b.title) + '</h1>' +
+      '<p class="lead big-body">' + esc(b.body) + '</p>';
+  } else if (b.type === 'image') {
+    stage.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
+      '<img src="' + encodeURI(b.url || '') + '" alt="" style="max-width:100%;max-height:20rem;border-radius:8px;margin-top:14px">';
+  } else {
+    stage.innerHTML =
+      '<div class="brand">StreamBox &middot; Live</div>' +
+      (b.title ? '<h1>' + esc(b.title) + '</h1>' : '') +
+      '<video src="' + encodeURI(b.url || '') + '" controls autoplay muted playsinline ' +
+      'style="width:100%;max-width:32rem;border-radius:8px;margin-top:14px;background:#000"></video>';
+  }
+}
+
+function drawSite() {
+  stage.innerHTML =
+    '<h1>Activate your device</h1>' +
+    '<p class="lead">Type the code showing on the TV screen tab.</p>' +
+    '<form id="f" autocomplete="off">' +
+      '<label for="code">Activation code</label>' +
+      '<input id="code" maxlength="9" placeholder="XXXX-XXXX" spellcheck="false" required>' +
+      '<button class="go" type="submit">Connect device</button>' +
+    '</form><div id="msg"></div>';
+  $('foot').textContent = 'Codes are letters only — no numbers, no O or I.';
+
+  const input = $('code');
+  input.addEventListener('input', () => { input.value = normalise(input.value); });
+
+  $('f').addEventListener('submit', e => {
+    e.preventDefault();
+    const code = normalise(input.value);
+    const s    = readState();
+    const dev  = s.devices[code];
+
+    if (code.length !== 9) {
+      showMsg('bad', 'Wrong code', 'A code is 8 letters, like BDWP-HQPK.');
+    } else if (!dev) {
+      showMsg('bad', 'Wrong code', 'That code does not match any device. Check the TV screen and try again.');
+    } else if (dev.status === 'paired') {
+      showMsg('bad', 'Already used', 'This code has already activated a device.');
+    } else {
+      dev.status = 'paired';
+      writeState(s);
+      showMsg('ok', 'Your device has been paired', 'Switch to the TV screen tab — it has already changed.');
+    }
+  });
+}
+
+/* The portal re-renders on every state change, so hold the half-typed
+   broadcast here rather than losing it mid-sentence. */
+const draft = { title:'Match starts in 10 minutes', body:'India vs Australia — Second Innings', url:'' };
+
+function drawPortal() {
+  const s = readState();
+  const paired = Object.entries(s.devices).filter(([,d]) => d.status === 'paired');
+
+  stage.innerHTML =
+    '<h1>Broadcast portal</h1>' +
+    '<p class="lead">Whatever you send appears on every paired screen instantly.</p>' +
+    '<form id="f" autocomplete="off">' +
+      '<div class="row"><label for="type">What to show</label>' +
+      '<select id="type"><option value="message">Message on screen</option>' +
+      '<option value="video">Play a video (MP4)</option>' +
+      '<option value="image">Show an image</option></select></div>' +
+      '<div class="row"><label for="title">Title</label>' +
+      '<input id="title" value="' + esc(draft.title) + '"></div>' +
+      '<div class="row"><label for="body">Message</label>' +
+      '<textarea id="body">' + esc(draft.body) + '</textarea></div>' +
+      '<div class="row"><label for="url">Media URL — for video or image</label>' +
+      '<input id="url" placeholder="https://example.com/clip.mp4" value="' + esc(draft.url) + '"></div>' +
+      '<button class="go" type="submit">Broadcast now</button>' +
+      '<button class="go ghost" type="button" id="stop">Stop broadcast</button>' +
+    '</form><div id="msg"></div>' +
+    '<div class="devices"><h2>Paired devices</h2>' +
+    (paired.length
+      ? paired.map(([,d]) => '<div class="dev"><span class="pip"></span><span>' + esc(d.name) + '</span></div>').join('')
+      : '<div class="empty">None yet — pair the TV screen tab first.</div>') +
+    '</div>';
+  $('foot').textContent = 'This demo runs entirely in your browser. The PHP version does the same over HTTP, between real machines.';
+
+  const send = type => {
+    const url = $('url').value.trim();
+    if ((type === 'video' || type === 'image') && !/^https?:\/\//i.test(url)) {
+      showMsg('bad', 'Media URL needed', 'Include https:// for a video or image broadcast.');
+      return;
+    }
+    const s2 = readState();
+    s2.broadcast = { id:Date.now(), type, title:$('title').value, body:$('body').value, url };
+    writeState(s2);   // rebuilds the form, so the message goes in afterwards
+    showMsg(
+      'ok',
+      type === 'off' ? 'Broadcast stopped' : 'Sent',
+      type === 'off' ? 'Screens are back to idle.' : 'Every paired screen has it now.'
+    );
+  };
+
+  ['title','body','url'].forEach(k =>
+    $(k).addEventListener('input', () => { draft[k] = $(k).value; }));
+
+  $('f').addEventListener('submit', e => { e.preventDefault(); send($('type').value); });
+  $('stop').addEventListener('click', () => send('off'));
+}
+
+/* ---------- plumbing ---------- */
+
+function render() {
+  if (view === 'tv')     return drawTv();
+  if (view === 'site')   return drawSite();
+  if (view === 'portal') return drawPortal();
+}
+
+document.querySelectorAll('.tabs button').forEach(b => {
+  b.addEventListener('click', () => {
+    view = b.dataset.v;
+    document.querySelectorAll('.tabs button').forEach(x =>
+      x.setAttribute('aria-selected', String(x === b)));
+    render();
+  });
+});
+
+// Another tab changed something.
+chan && chan.addEventListener('message', render);
+window.addEventListener('storage', e => { if (e.key === KEY) render(); });
+
+render();
+</script>
+</body>
+</html>
