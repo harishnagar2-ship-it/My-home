@@ -66,22 +66,38 @@ COLUMNS = [
 
 # OSM tags that mark a home-service trade, keyed by the label we export.
 OSM_CATEGORY_TAGS = {
-    "plumber": '["craft"="plumber"]',
-    "electrician": '["craft"="electrician"]',
-    "hvac contractor": '["craft"="hvac"]',
-    "roofing contractor": '["craft"="roofer"]',
-    "painter": '["craft"="painter"]',
-    "handyman": '["craft"="handyman"]',
-    "landscaping": '["craft"="gardener"]',
-    "house cleaning": '["craft"="cleaning"]',
-    "locksmith": '["shop"="locksmith"]',
-    "carpenter": '["craft"="carpenter"]',
-    "flooring contractor": '["craft"="floorer"]',
-    "tiler": '["craft"="tiler"]',
-    "window cleaning": '["craft"="window_cleaner"]',
-    "pest control": '["office"="pest_control"]',
-    "moving company": '["office"="moving_company"]',
+    "plumber": ['["craft"="plumber"]'],
+    "electrician": ['["craft"="electrician"]'],
+    "hvac contractor": ['["craft"="hvac"]'],
+    "roofing contractor": ['["craft"="roofer"]'],
+    "painter": ['["craft"="painter"]'],
+    "handyman": ['["craft"="handyman"]'],
+    "landscaping": ['["craft"="gardener"]', '["craft"="landscape_gardener"]'],
+    "tree service": ['["craft"="tree_surgeon"]'],
+    "house cleaning": ['["craft"="cleaning"]'],
+    "window cleaning": ['["craft"="window_cleaner"]'],
+    "chimney sweep": ['["craft"="chimney_sweeper"]'],
+    "locksmith": ['["shop"="locksmith"]', '["craft"="locksmith"]'],
+    "carpenter": ['["craft"="carpenter"]', '["craft"="joiner"]'],
+    "flooring contractor": ['["craft"="floorer"]'],
+    "tiler": ['["craft"="tiler"]'],
+    "plasterer": ['["craft"="plasterer"]'],
+    "stonemason": ['["craft"="stonemason"]'],
+    "glazier": ['["craft"="glaziery"]'],
+    "window contractor": ['["craft"="window_construction"]'],
+    "metal fabricator": ['["craft"="metal_construction"]'],
+    "insulation contractor": ['["craft"="insulation"]'],
+    "scaffolder": ['["craft"="scaffolder"]'],
+    "well drilling": ['["craft"="well_drilling"]'],
+    "appliance repair": ['["craft"="electronics_repair"]', '["shop"="appliance"]'],
+    "pest control": ['["office"="pest_control"]', '["craft"="pest_control"]'],
+    "moving company": ['["office"="moving_company"]'],
+    "builder": ['["craft"="builder"]', '["office"="construction_company"]'],
 }
+
+# One sweep that catches every mapped trade, including tags not listed above.
+OSM_ALL_TRADES = ['["craft"]', '["shop"="locksmith"]', '["office"="pest_control"]',
+                  '["office"="moving_company"]', '["office"="construction_company"]']
 
 US_AREA_ID = 3600148838  # OSM relation 148838 = United States
 OVERPASS_URLS = [
@@ -191,20 +207,29 @@ def google_to_lead(p, category):
 # OpenStreetMap Overpass
 # --------------------------------------------------------------------------
 
-def overpass_query(tag_filter):
-    return (
-        f"[out:json][timeout:180];area(id:{US_AREA_ID})->.us;"
-        f"(nwr{tag_filter}[\"phone\"](area.us);"
-        f" nwr{tag_filter}[\"contact:phone\"](area.us););"
-        f"out tags center;"
+def overpass_area(name):
+    """Build the Overpass area statement. Default is the whole US."""
+    if not name or name.strip().lower() in ("us", "usa", "united states"):
+        return f"area(id:{US_AREA_ID})->.searchArea;"
+    safe = name.replace('"', '')
+    return (f'area["name"="{safe}"]["boundary"="administrative"]'
+            f'["admin_level"~"^(4|6|8)$"]->.searchArea;')
+
+
+def overpass_query(tag_filters, area_stmt, timeout=300):
+    """Businesses matching any tag filter that publish a phone number."""
+    body = "".join(
+        f'nwr{tf}["phone"](area.searchArea);nwr{tf}["contact:phone"](area.searchArea);'
+        for tf in tag_filters
     )
+    return f"[out:json][timeout:{timeout}];{area_stmt}({body});out tags center;"
 
 
 def overpass_get(query):
     last = None
     for url in OVERPASS_URLS:
         try:
-            r = requests.post(url, data={"data": query}, timeout=200)
+            r = requests.post(url, data={"data": query}, timeout=420)
             if r.status_code == 200:
                 return r.json()
             last = f"{url} -> {r.status_code}"
@@ -213,14 +238,15 @@ def overpass_get(query):
     raise RuntimeError(f"Overpass unreachable: {last}")
 
 
-def osm_search(category, tag_filter, get=overpass_get):
-    data = get(overpass_query(tag_filter))
+def osm_search(category, tag_filters, area_stmt, get=overpass_get, timeout=300):
+    data = get(overpass_query(tag_filters, area_stmt, timeout))
     for el in data.get("elements", []):
         t = el.get("tags", {})
         yield osm_to_lead(el, t, category)
 
 
-def osm_to_lead(el, t, category):
+def osm_to_lead(el, t, category=None):
+    category = category or t.get("craft") or t.get("shop") or t.get("office") or ""
     street = " ".join(x for x in [t.get("addr:housenumber", ""), t.get("addr:street", "")] if x)
     city, state, zipc = t.get("addr:city", ""), t.get("addr:state", ""), t.get("addr:postcode", "")
     address = ", ".join(x for x in [street, city, f"{state} {zipc}".strip()] if x)
@@ -306,19 +332,30 @@ def run(args, post=google_post, get=overpass_get):
             if len(found) >= limit:
                 break
     else:
-        for cat in args.categories:
-            tag = OSM_CATEGORY_TAGS.get(cat)
-            if not tag:
-                print(f"[osm] skipping '{cat}' (no OSM tag mapping; see OSM_CATEGORY_TAGS)")
-                continue
-            if len(found) >= limit:
-                break
-            print(f"[osm] {cat} (whole US)")
-            for lead in osm_search(cat, tag, get=get):
+        area_stmt = overpass_area(args.osm_area)
+        where = args.osm_area or "the whole US"
+        if args.osm_all_trades:
+            print(f"[osm] every mapped trade in {where} (one sweep, can take minutes)")
+            for lead in osm_search(None, OSM_ALL_TRADES, area_stmt, get=get,
+                                   timeout=args.osm_timeout):
                 take(lead)
                 if len(found) >= limit:
                     break
-            time.sleep(args.delay)
+        else:
+            for cat in args.categories:
+                tags = OSM_CATEGORY_TAGS.get(cat)
+                if not tags:
+                    print(f"[osm] skipping '{cat}' (no OSM tag; try --osm-all-trades)")
+                    continue
+                if len(found) >= limit:
+                    break
+                print(f"[osm] {cat} in {where}")
+                for lead in osm_search(cat, tags, area_stmt, get=get,
+                                       timeout=args.osm_timeout):
+                    take(lead)
+                    if len(found) >= limit:
+                        break
+                time.sleep(args.delay)
 
     write_leads(out, found)
     print(f"\n{len(found)} new leads written to {out} ({len(seen)} total in file)")
@@ -337,6 +374,9 @@ def parse_args(argv=None):
     p.add_argument("--delay", type=float, default=1.0, help="seconds between queries")
     p.add_argument("--include-with-website", action="store_true",
                    help="keep businesses that DO have a website (default: drop them)")
+    p.add_argument("--osm-area", default="", help='OSM backend: limit to a state/county/city, e.g. "Texas". Default: whole US')
+    p.add_argument("--osm-all-trades", action="store_true", help="OSM backend: one sweep across every mapped trade")
+    p.add_argument("--osm-timeout", type=int, default=300, help="OSM backend: Overpass server-side timeout in seconds")
     p.add_argument("--out", default="home_services_leads.csv")
     a = p.parse_args(argv)
     if a.cities_file:

@@ -42,9 +42,24 @@ limit (30/day keeps you inside the monthly free allowance). Add a budget alert
 under Billing -> Budgets & alerts as a backstop. Check the current rates at
 developers.google.com/maps/billing-and-pricing/pricing before a large run.
 
-**OpenStreetMap (no key).** `--backend osm` queries the Overpass API for the
-whole US per category. It is free but only lists businesses volunteers have
-mapped with a phone number, so expect far fewer results.
+**OpenStreetMap (no key, no card).** `--backend osm` queries the free Overpass
+API. It only finds businesses that volunteers have mapped *with a phone number*,
+so expect hundreds to low thousands nationwide rather than tens of thousands.
+
+```bash
+# one sweep across every mapped trade in a state (best yield per query)
+python .../find_leads.py --backend osm --osm-all-trades --osm-area "Texas" --limit 500 --out tx.csv
+# whole US, single trade
+python .../find_leads.py --backend osm --categories plumber --limit 200
+```
+
+- `--osm-area` scopes to a state, county or city by OSM name. **Use it.** A
+  whole-US sweep often exceeds the public Overpass server's time limit.
+- `--osm-all-trades` runs one query covering every `craft=*` business plus
+  locksmiths, pest control, movers and construction firms, and labels each lead
+  with its own OSM tag. Far more productive than looping categories.
+- `--osm-timeout` raises the server-side limit (default 300s) for large areas.
+- If a query fails, the script tries three Overpass mirrors before giving up.
 
 ## Run
 
