@@ -28,8 +28,19 @@ export GOOGLE_MAPS_API_KEY=your_key
 ```
 
 Each query is one billable Text Search request returning up to 20 businesses.
-Google's monthly free tier covers roughly 1,000 of these requests, which is
-enough for tens of thousands of listings. Keep `--limit` set and it stops early.
+A billing account with a card is required even to use the free allowance.
+
+Google replaced its old $200 monthly credit in March 2025 with a per-SKU free
+allowance that resets on the 1st and does not roll over. This script requests
+phone and website fields, which puts it in the highest-priced Text Search SKU,
+so budget for about 1,000 free calls per month, roughly 20,000 listings. That
+is far more than a 1,000-lead run needs.
+
+**Cap the spend before the first run** so overruns fail instead of billing you:
+Cloud Console -> APIs & Services -> Places API -> Quotas -> set a daily request
+limit (30/day keeps you inside the monthly free allowance). Add a budget alert
+under Billing -> Budgets & alerts as a backstop. Check the current rates at
+developers.google.com/maps/billing-and-pricing/pricing before a large run.
 
 **OpenStreetMap (no key).** `--backend osm` queries the Overpass API for the
 whole US per category. It is free but only lists businesses volunteers have
