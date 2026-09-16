@@ -61,6 +61,15 @@ python .../find_leads.py --backend osm --categories plumber --limit 200
 - `--osm-timeout` raises the server-side limit (default 300s) for large areas.
 - If a query fails, the script tries three Overpass mirrors before giving up.
 
+## Bigger, keyless alternative
+
+For volume without a Google billing account, use gosom's MIT-licensed
+google-maps-scraper (github.com/gosom/google-maps-scraper), run locally via
+Docker. It scrapes Google Maps directly, needs no API key, and its `-email`
+flag pulls emails off each business website, which this script cannot do. Feed
+its CSV into `audit_sites.py` to score the websites. Note that scraping Google
+Maps breaches Google's terms of service, unlike the OpenStreetMap backend here.
+
 ## Run
 
 ```bash
